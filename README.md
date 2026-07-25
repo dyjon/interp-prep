@@ -8,6 +8,7 @@ Pre-MSDS work, summer 2026, toward an interpretability capstone at JHU AMS.
 - [x] **Induction-head detection** (`src/induction_heads.py`)
 - [x] **IOI circuit via activation patching** (`src/ioi_patching.py`)
 - [x] **Steering-vector reachability** (`src/steering_reachability.py`)
+- [x] **Metalinguistic judgment vs string probability** (`src/metalinguistic_gap.py`)
 - [ ] Sparse autoencoder features on the IOI circuit
 - [ ] Path patching, to show how the IOI components compose
 
@@ -84,6 +85,32 @@ qualitatively unreachable.
 
 ![steering](report_steering.png)
 
+### Metalinguistic judgment vs string probability
+
+A small check of the finding in Hu et al. that a model's direct metalinguistic judgments
+diverge from what its string probabilities imply. 24 minimal pairs across six phenomena
+(subject-verb agreement, determiner-noun agreement, anaphora, auxiliaries, word order,
+verb form), asked two ways:
+
+- **implicit** — compare mean per-token log probability of the grammatical sentence
+  against the ungrammatical one
+- **metalinguistic** — prompt "Is the following sentence grammatical?" and compare
+  P(" Yes") against P(" No")
+
+| Method | Correct |
+|---|---|
+| implicit (string probability) | **23/24 = 96%** |
+| metalinguistic (asking the model) | **11/24 = 46%** |
+| the two agree | 12/24 = 50% |
+
+The gap is large and in the reported direction. But the diagnostic underneath it is what
+matters: only **14.7%** of the model's probability mass falls on "Yes" or "No" combined,
+and P(Yes) is nearly constant across items (mean 0.593, sd 0.080).
+
+GPT-2 small is not answering the question. So the 46% does not isolate a failure to
+introspect. A failure to follow the instruction accounts for it entirely, and at this
+scale the two are not separable.
+
 ## Notes and limitations
 
 **IOI**
@@ -104,6 +131,14 @@ qualitatively unreachable.
 - No check that the steering vector actually changes behaviour at these strengths. A
   geometric departure that produces no behavioural effect would mean something different
   from one that does.
+
+**Metalinguistic gap**
+- Only GPT-2 small was tested. The obvious next step is a small instruction-tuned model,
+  where the Yes/No channel should actually engage, but then instruction tuning becomes a
+  confound of its own.
+- 24 hand-written minimal pairs is a small and unbalanced sample next to BLiMP.
+- The metalinguistic result depends on one prompt format. A different phrasing, or
+  few-shot examples, might recover the Yes/No channel entirely.
 
 ## Setup
 
