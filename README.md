@@ -9,6 +9,7 @@ Pre-MSDS work, summer 2026, toward an interpretability capstone at JHU AMS.
 - [x] **IOI circuit via activation patching** (`src/ioi_patching.py`)
 - [x] **Steering-vector reachability** (`src/steering_reachability.py`)
 - [x] **Metalinguistic judgment vs string probability** (`src/metalinguistic_gap.py`)
+- [x] **LoRA vs LoRA+** (`src/lora_plus.py`)
 - [ ] Sparse autoencoder features on the IOI circuit
 - [ ] Path patching, to show how the IOI components compose
 
@@ -111,6 +112,32 @@ GPT-2 small is not answering the question. So the 46% does not isolate a failure
 introspect. A failure to follow the instruction accounts for it entirely, and at this
 scale the two are not separable.
 
+### LoRA vs LoRA+
+
+Hayou et al. observe that a LoRA adapter's A and B matrices should not share a learning
+rate, since B starts at zero and A does not. LoRA+ sets lr_B = lambda * lr_A.
+
+The adapter is implemented directly rather than via a library, because the experiment is
+about controlling per-matrix learning rates and that is easier to verify when the
+parameters are explicit in the optimiser groups. Task: 128 synthetic person-to-city
+associations, loss scored on the city token only. Rank 16, 100 steps.
+
+| base lr | vanilla (lambda=1) | LoRA+ (lambda=16) | |
+|---|---|---|---|
+| 1e-4 | 3.009 | **1.186** | LoRA+ 61% better |
+| 3e-4 | 2.280 | **0.559** | LoRA+ 76% better |
+| 1e-3 | **1.239** | 1.407 | vanilla 14% better |
+
+Best of each over the sweep: vanilla 1.239, LoRA+ 0.559.
+
+**The first attempt got this backwards.** Running only at lr=1e-3, LoRA+ looked far worse
+(1.43 against 0.55 at rank 16). That is the single setting in the sweep where it loses,
+and the reason is that multiplying an already-tuned rate by 16 puts lr_B at 1.6e-2, which
+is simply too large. Reusing a base rate tuned for vanilla LoRA is not a fair test of
+LoRA+; the base rate has to be swept alongside lambda.
+
+![LoRA+](report_lora_plus.png)
+
 ## Notes and limitations
 
 **IOI**
@@ -131,6 +158,15 @@ scale the two are not separable.
 - No check that the steering vector actually changes behaviour at these strengths. A
   geometric departure that produces no behavioural effect would mean something different
   from one that does.
+
+**LoRA+**
+- Fixed 100-step budget, so this is a statement about convergence speed rather than final
+  quality. An earlier 120-step run reached 0.546 with vanilla at lr=1e-3, close to LoRA+'s
+  0.559 at 100 steps, so a longer budget may narrow the gap considerably.
+- Synthetic memorisation of 128 associations, full-batch, one model size. Nothing here
+  speaks to the scaling arguments the method is actually motivated by.
+- Only lambda in {1, 16} and three base rates. The interaction between the two is clearly
+  the whole story and deserves a finer grid.
 
 **Metalinguistic gap**
 - Only GPT-2 small was tested. The obvious next step is a small instruction-tuned model,
