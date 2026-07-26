@@ -112,6 +112,27 @@ GPT-2 small is not answering the question. So the 46% does not isolate a failure
 introspect. A failure to follow the instruction accounts for it entirely, and at this
 scale the two are not separable.
 
+**Follow-up on an instruction-tuned model** (`src/metalinguistic_instruct.py`), to see
+whether the channel opens at all:
+
+| | GPT-2 small | SmolLM2-360M-Instruct |
+|---|---|---|
+| implicit (sentence log prob) | 96% | 96% |
+| metalinguistic (asked) | 46% | **71%** |
+| the two agree | 50% | 75% |
+| Yes/No probability mass | 0.147 | **0.963** |
+| P(Yes) spread | sd 0.080 | sd 0.021, range [0.729, 0.817] |
+
+The channel opens: 96% of the mass now lands on Yes or No, so the model is answering.
+And a gap survives, 96% against 71%, which is the reported effect showing up once
+instruction-following is no longer the bottleneck.
+
+The subtlety is that P(Yes) sits between 0.73 and 0.82 for every item, grammatical or
+not. In absolute terms the model accepts everything; threshold at 0.5 and it calls all 24
+sentences grammatical. The 71% only exists because the score compares paired items
+against each other. So what survives is a faint relative ranking rather than a judgment
+anyone could use, and "the model can report what it knows" is too strong a reading of it.
+
 ### LoRA vs LoRA+
 
 Hayou et al. observe that a LoRA adapter's A and B matrices should not share a learning
@@ -169,12 +190,17 @@ LoRA+; the base rate has to be swept alongside lambda.
   the whole story and deserves a finer grid.
 
 **Metalinguistic gap**
-- Only GPT-2 small was tested. The obvious next step is a small instruction-tuned model,
-  where the Yes/No channel should actually engage, but then instruction tuning becomes a
-  confound of its own.
 - 24 hand-written minimal pairs is a small and unbalanced sample next to BLiMP.
-- The metalinguistic result depends on one prompt format. A different phrasing, or
-  few-shot examples, might recover the Yes/No channel entirely.
+- Both results depend on one prompt format. A different phrasing, or few-shot examples,
+  might move the metalinguistic number substantially.
+- The instruction-tuned comparison is not a clean control. Instruction tuning changes the
+  model in ways well beyond making it willing to answer, so the surviving gap could
+  reflect any of them.
+- The two models differ in size as well as tuning, so nothing here separates scale from
+  instruction tuning.
+- P(Yes) being confined to [0.73, 0.82] means the metalinguistic score is measuring a
+  ranking between paired items, not a decision. A single-sentence judgment would be at
+  ceiling-yes for everything.
 
 ## Setup
 
