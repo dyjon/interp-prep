@@ -1,16 +1,23 @@
-"""LoRA vs LoRA+ on GPT-2 small.
+"""LoRA vs LoRA+ on GPT-2 small: sweeping the learning-rate ratio lambda.
 
-Hayou et al. observe that in a LoRA adapter, the A and B matrices should not share a
-learning rate: B is initialised at zero while A is not, so the two sit at different
-scales and a single rate is suboptimal. LoRA+ sets lr_B = lambda * lr_A.
+Hayou, Ghosh and Yu (ICML 2024) show that LoRA's A and B matrices should not share
+a learning rate. B is initialised at zero and A is not, so dL/dA is proportional to B
+and vanishes at initialisation: A cannot move until B does. Their Theorem 1 says
+efficient feature learning requires eta_A = Theta(1/n) and eta_B = Theta(1), hence a
+ratio eta_B/eta_A = Theta(n) in the width. LoRA+ fixes a ratio lambda and tunes eta_A
+only, keeping the search one-dimensional.
 
-This compares the two directly. The adapter is implemented here rather than pulled from
-a library, because the whole experiment is about controlling the per-matrix learning
-rates and that is easier to get right when the parameters are explicit.
+The paper's recommended lambda depends on which matrix is zeroed at initialisation:
 
-Task. A synthetic association the base model cannot already know: 128 person-to-city
-pairs, formatted "<name> lives in <city>." Loss is measured on the city token only, so
-what is being learned is the new association rather than general English.
+    Init[1]   B = 0, A random    lambda ~ 2^2 to 2^3   (4 to 8)   <- standard LoRA
+    Init[2]   A = 0, B random    lambda ~ 2^4          (16)
+
+An earlier version of this script used Init[1] with lambda = 16, which is the Init[2]
+recommendation. This sweep tests both schemes across lambda to see whether the
+init-dependence the paper reports shows up at this scale.
+
+Task: 128 synthetic person-to-city associations, loss scored on the city token only,
+so what is measured is the new association rather than general English.
 
 Run: python src/lora_plus.py
 """
@@ -24,12 +31,12 @@ from transformers import GPT2LMHeadModel, GPT2TokenizerFast
 
 SEED = 0
 RANK = 16
-LAMBDAS = [1.0, 16.0]  # 1.0 is vanilla LoRA, 16.0 is LoRA+
-# The base rate has to be swept alongside lambda. Reusing a rate tuned for vanilla LoRA
-# and then multiplying lr_B by 16 is not a fair comparison, it just makes lr_B too large.
-LEARNING_RATES = [1e-4, 3e-4, 1e-3]
-STEPS = 100
 ALPHA = 16
+STEPS = 100
+
+LAMBDAS = [1.0, 4.0, 8.0, 16.0]          # 1.0 is vanilla LoRA
+LEARNING_RATES = [1e-4, 3e-4, 1e-3]
+INIT_SCHEMES = ["init1", "init2"]
 
 NAMES = [
     "Alden", "Brill", "Corven", "Dremer", "Eskil", "Farlow", "Girn", "Halvard",
@@ -45,68 +52,68 @@ CITIES = [
 
 def build_data(tokenizer, n=128):
     rng = random.Random(SEED)
-    pairs = []
-    for i in range(n):
-        name = NAMES[i % len(NAMES)]
-        suffix = i // len(NAMES)
-        name = name if suffix == 0 else f"{name}{suffix}"
-        city = rng.choice(CITIES)
-        pairs.append((name, city))
-
     inputs, city_positions = [], []
-    for name, city in pairs:
+    for i in range(n):
+        base = NAMES[i % len(NAMES)]
+        suffix = i // len(NAMES)
+        name = base if suffix == 0 else f"{base}{suffix}"
+        city = rng.choice(CITIES)
         prefix = f"{name} lives in"
-        full = f"{prefix} {city}."
-        prefix_ids = tokenizer(prefix)["input_ids"]
-        full_ids = tokenizer(full)["input_ids"]
-        inputs.append(full_ids)
-        city_positions.append(len(prefix_ids))  # index of the first city token
+        inputs.append(tokenizer(f"{prefix} {city}.")["input_ids"])
+        city_positions.append(len(tokenizer(prefix)["input_ids"]))
 
     width = max(len(x) for x in inputs)
-    pad = tokenizer.eos_token_id
-    tokens = torch.full((len(inputs), width), pad, dtype=torch.long)
+    tokens = torch.full((len(inputs), width), tokenizer.eos_token_id, dtype=torch.long)
     mask = torch.zeros((len(inputs), width), dtype=torch.bool)
     for i, (ids, pos) in enumerate(zip(inputs, city_positions)):
         tokens[i, : len(ids)] = torch.tensor(ids)
-        mask[i, pos] = True  # score only the city token
+        mask[i, pos] = True
     return tokens, mask
 
 
 class LoRAAdapter(nn.Module):
-    """Wraps a GPT-2 Conv1D layer (weight is [in_features, out_features])."""
+    """Wraps a GPT-2 Conv1D layer, whose weight is [in_features, out_features].
 
-    def __init__(self, base, rank, alpha):
+    init1: B = 0, A ~ N(0, 1/n_in).  Standard LoRA. Variance scales with width,
+           per the paper's sigma_a^2 = Theta(n^-1), not with rank.
+    init2: A = 0, B ~ N(0, 1).       sigma_b^2 = Theta(1).
+    """
+
+    def __init__(self, base, rank, alpha, scheme):
         super().__init__()
         self.base = base
         for p in self.base.parameters():
             p.requires_grad = False
         n_in, n_out = base.weight.shape
-        self.A = nn.Parameter(torch.randn(n_in, rank) / math.sqrt(rank))
-        self.B = nn.Parameter(torch.zeros(rank, n_out))
+
+        if scheme == "init1":
+            self.A = nn.Parameter(torch.randn(n_in, rank) / math.sqrt(n_in))
+            self.B = nn.Parameter(torch.zeros(rank, n_out))
+        elif scheme == "init2":
+            self.A = nn.Parameter(torch.zeros(n_in, rank))
+            self.B = nn.Parameter(torch.randn(rank, n_out))
+        else:
+            raise ValueError(scheme)
+
         self.scale = alpha / rank
 
     def forward(self, x):
         return self.base(x) + (x @ self.A @ self.B) * self.scale
 
 
-def attach_adapters(model, rank):
-    adapters = []
-    for block in model.transformer.h:
-        adapter = LoRAAdapter(block.attn.c_attn, rank, ALPHA)
-        block.attn.c_attn = adapter
-        adapters.append(adapter)
-    return adapters
-
-
-def train(rank, lam, lr, tokens, mask, verbose=False):
+def train(lam, lr, scheme, tokens, mask):
     torch.manual_seed(SEED)
     model = GPT2LMHeadModel.from_pretrained("gpt2")
     model.train()
     for p in model.parameters():
         p.requires_grad = False
-    adapters = attach_adapters(model, rank)
 
-    # this is the whole point: A and B get different learning rates
+    adapters = []
+    for block in model.transformer.h:
+        adapter = LoRAAdapter(block.attn.c_attn, RANK, ALPHA, scheme)
+        block.attn.c_attn = adapter
+        adapters.append(adapter)
+
     opt = torch.optim.AdamW(
         [
             {"params": [a.A for a in adapters], "lr": lr},
@@ -115,9 +122,8 @@ def train(rank, lam, lr, tokens, mask, verbose=False):
     )
 
     losses = []
-    for step in range(STEPS):
+    for _ in range(STEPS):
         logits = model(tokens).logits
-        # predict token at position p from position p-1
         target_logits = logits[:, :-1][mask[:, 1:]]
         targets = tokens[:, 1:][mask[:, 1:]]
         loss = nn.functional.cross_entropy(target_logits, targets)
@@ -125,51 +131,62 @@ def train(rank, lam, lr, tokens, mask, verbose=False):
         loss.backward()
         opt.step()
         losses.append(loss.item())
-        if verbose and step % 20 == 0:
-            print(f"    step {step:3d}  loss {loss.item():.4f}")
     return losses
 
 
 def main():
     tokenizer = GPT2TokenizerFast.from_pretrained("gpt2")
     tokens, mask = build_data(tokenizer)
-    print(f"{tokens.shape[0]} examples, {tokens.shape[1]} tokens wide, "
-          f"{mask.sum().item()} scored positions\n")
+    print(f"{tokens.shape[0]} examples, {mask.sum().item()} scored positions")
+    print(f"rank {RANK}, {STEPS} steps, AdamW\n")
 
     results = {}
-    for lr in LEARNING_RATES:
+    for scheme in INIT_SCHEMES:
+        for lr in LEARNING_RATES:
+            for lam in LAMBDAS:
+                key = (scheme, lr, lam)
+                losses = train(lam, lr, scheme, tokens, mask)
+                results[key] = losses
+                print(f"{scheme}  lr={lr:g}  lambda={lam:>4.0f}  final loss {losses[-1]:.4f}")
+
+    for scheme in INIT_SCHEMES:
+        label = ("Init[1]: B=0, A random (standard LoRA). Paper suggests lambda 4-8."
+                 if scheme == "init1" else
+                 "Init[2]: A=0, B random. Paper suggests lambda 16.")
+        print("\n" + "=" * 66)
+        print(label)
+        header = "  base lr  " + "".join(f"{'l=' + str(int(l)):>12}" for l in LAMBDAS)
+        print(header)
+        print("-" * 66)
+        for lr in LEARNING_RATES:
+            row = f"{lr:>10g}  "
+            for lam in LAMBDAS:
+                row += f"{results[(scheme, lr, lam)][-1]:>12.4f}"
+            print(row)
+
+        best = min(((results[(scheme, lr, lam)][-1], lr, lam)
+                    for lr in LEARNING_RATES for lam in LAMBDAS))
+        vanilla = min(results[(scheme, lr, 1.0)][-1] for lr in LEARNING_RATES)
+        print(f"\n  best overall: loss {best[0]:.4f} at lr={best[1]:g}, lambda={best[2]:.0f}")
+        print(f"  best vanilla (lambda=1): loss {vanilla:.4f}")
+        if best[2] != 1.0:
+            print(f"  LoRA+ improvement: {(vanilla - best[0]) / vanilla:+.1%}")
+
+    fig, axes = plt.subplots(1, 2, figsize=(13, 4.5), sharey=True)
+    for ax, scheme in zip(axes, INIT_SCHEMES):
         for lam in LAMBDAS:
-            print(f"training lr={lr:g}, lambda={lam:.0f} ...")
-            results[(lr, lam)] = train(RANK, lam, lr, tokens, mask)
-            print(f"    final loss {results[(lr, lam)][-1]:.4f}")
-
-    print("\n" + "=" * 60)
-    print(f"rank {RANK}, {STEPS} steps. lambda 1 is vanilla LoRA, 16 is LoRA+.\n")
-    print(f"{'base lr':>10} {'vanilla':>12} {'LoRA+':>12} {'LoRA+ better?':>16}")
-    print("-" * 60)
-    for lr in LEARNING_RATES:
-        van = results[(lr, 1.0)][-1]
-        plus = results[(lr, 16.0)][-1]
-        verdict = f"yes, {(van - plus) / van:+.1%}" if plus < van else f"no, {(van - plus) / van:+.1%}"
-        print(f"{lr:>10g} {van:>12.4f} {plus:>12.4f} {verdict:>16}")
-
-    best_van = min(results[(lr, 1.0)][-1] for lr in LEARNING_RATES)
-    best_plus = min(results[(lr, 16.0)][-1] for lr in LEARNING_RATES)
-    print(f"\nbest over the lr sweep:  vanilla {best_van:.4f}   LoRA+ {best_plus:.4f}")
-    print("Each method at its own best learning rate is the only fair comparison.")
-
-    plt.figure(figsize=(7.5, 4.5))
-    colors = {1e-4: "tab:blue", 3e-4: "tab:orange", 1e-3: "tab:green"}
-    for (lr, lam), losses in results.items():
-        plt.plot(losses, "-" if lam == 1.0 else "--", color=colors[lr],
-                 label=f"lr {lr:g}, {'vanilla' if lam == 1.0 else 'LoRA+'}")
-    plt.xlabel("step")
-    plt.ylabel("loss on the city token")
-    plt.yscale("log")
-    plt.title(f"LoRA vs LoRA+ across base learning rates, GPT-2 small, rank {RANK}")
-    plt.legend(fontsize=8)
-    plt.tight_layout()
-    plt.savefig("report_lora_plus.png", dpi=150, bbox_inches="tight")
+            finals = [results[(scheme, lr, lam)][-1] for lr in LEARNING_RATES]
+            ax.plot(LEARNING_RATES, finals, "o-", label=f"lambda {lam:.0f}")
+        ax.set_xscale("log")
+        ax.set_yscale("log")
+        ax.set_xlabel("base learning rate (eta_A)")
+        ax.set_title("Init[1]  B=0, A random" if scheme == "init1"
+                     else "Init[2]  A=0, B random")
+        ax.legend(fontsize=8)
+    axes[0].set_ylabel("final loss on the city token")
+    fig.suptitle(f"LoRA+ ratio sweep, GPT-2 small, rank {RANK}, {STEPS} steps")
+    fig.tight_layout()
+    fig.savefig("report_lora_plus.png", dpi=150, bbox_inches="tight")
     print("\nSaved report_lora_plus.png")
 
 

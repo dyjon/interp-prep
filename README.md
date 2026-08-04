@@ -143,19 +143,48 @@ about controlling per-matrix learning rates and that is easier to verify when th
 parameters are explicit in the optimiser groups. Task: 128 synthetic person-to-city
 associations, loss scored on the city token only. Rank 16, 100 steps.
 
-| base lr | vanilla (lambda=1) | LoRA+ (lambda=16) | |
-|---|---|---|---|
-| 1e-4 | 3.009 | **1.186** | LoRA+ 61% better |
-| 3e-4 | 2.280 | **0.559** | LoRA+ 76% better |
-| 1e-3 | **1.239** | 1.407 | vanilla 14% better |
+The paper's recommended lambda depends on which matrix is zeroed at initialisation, so
+both schemes are swept: Init[1] is B=0 with A random (standard LoRA), Init[2] is A=0
+with B random.
 
-Best of each over the sweep: vanilla 1.239, LoRA+ 0.559.
+**Init[1], B=0, A random — final loss**
 
-**The first attempt got this backwards.** Running only at lr=1e-3, LoRA+ looked far worse
-(1.43 against 0.55 at rank 16). That is the single setting in the sweep where it loses,
-and the reason is that multiplying an already-tuned rate by 16 puts lr_B at 1.6e-2, which
-is simply too large. Reusing a base rate tuned for vanilla LoRA is not a fair test of
-LoRA+; the base rate has to be swept alongside lambda.
+| base lr | lambda=1 | lambda=4 | lambda=8 | lambda=16 |
+|---|---|---|---|---|
+| 1e-4 | 4.052 | 3.029 | 2.745 | 2.333 |
+| 3e-4 | 2.879 | 2.275 | 1.773 | 1.322 |
+| 1e-3 | 1.957 | 1.012 | 0.606 | **0.252** |
+
+**Init[2], A=0, B random — final loss**
+
+| base lr | lambda=1 | lambda=4 | lambda=8 | lambda=16 |
+|---|---|---|---|---|
+| 1e-4 | 2.850 | 2.687 | 2.553 | 2.400 |
+| 3e-4 | 1.727 | 1.457 | 1.319 | 1.106 |
+| 1e-3 | 1.314 | 0.760 | 0.614 | **0.427** |
+
+LoRA+ over best vanilla: **+87% (Init[1])**, **+68% (Init[2])**.
+
+### An earlier version of this experiment got the opposite result
+
+It reported LoRA+ as several times worse. The cause was **the initialisation of A**, not the
+learning rate. The old code used `randn/sqrt(rank)`; the paper requires sigma_A^2 =
+Theta(1/n), so it should be `randn/sqrt(n_in)`. With n_in=768 and rank=16 that made A
+roughly 7x too large, inflating the gradients into B until lambda=16 became unstable.
+
+Correcting the width-scaling of the initialisation reverses the conclusion entirely. Given
+that the paper's argument is itself about width-scaling, getting that scaling wrong in the
+initialisation is exactly the mistake that would break it.
+
+### What this does not reproduce
+
+The paper suggests lambda around 4-8 for Init[1] and 16 for Init[2]. Here **lambda is
+monotonically better up to 16 under both schemes**, so the optimum is not bracketed and may
+lie beyond 16, and the init-dependence does not appear.
+
+That may not be a contradiction. The paper selects lambda by test accuracy on GLUE tasks
+after convergence; this measures training loss on synthetic memorisation at a fixed 100-step
+budget. Different regime, and the fixed budget favours whichever setting moves fastest early.
 
 ![LoRA+](report_lora_plus.png)
 
@@ -181,13 +210,16 @@ LoRA+; the base rate has to be swept alongside lambda.
   from one that does.
 
 **LoRA+**
-- Fixed 100-step budget, so this is a statement about convergence speed rather than final
-  quality. An earlier 120-step run reached 0.546 with vanilla at lr=1e-3, close to LoRA+'s
-  0.559 at 100 steps, so a longer budget may narrow the gap considerably.
-- Synthetic memorisation of 128 associations, full-batch, one model size. Nothing here
-  speaks to the scaling arguments the method is actually motivated by.
-- Only lambda in {1, 16} and three base rates. The interaction between the two is clearly
-  the whole story and deserves a finer grid.
+- Fixed 100-step budget, so this measures convergence speed rather than final quality. The
+  paper's headline claim is a ~2x speedup, so speed is the right thing to be measuring, but
+  it does not test the separate 1-2% quality gain.
+- Lambda is monotonic up to 16, so the optimum is not bracketed. The sweep should extend to
+  32 and 64 before claiming anything about where it sits.
+- Synthetic memorisation of 128 associations, full-batch, one model size. The theory is a
+  large-width statement and GPT-2 small is n=768, so this sits outside the regime the
+  argument targets. Testing across GPT-2 small, medium and large (768, 1024, 1280) would
+  speak to it directly.
+- Loss is measured on a single token per example, which is a narrow target.
 
 **Metalinguistic gap**
 - 24 hand-written minimal pairs is a small and unbalanced sample next to BLiMP.
