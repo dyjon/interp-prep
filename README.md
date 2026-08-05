@@ -176,15 +176,30 @@ Correcting the width-scaling of the initialisation reverses the conclusion entir
 that the paper's argument is itself about width-scaling, getting that scaling wrong in the
 initialisation is exactly the mistake that would break it.
 
-### What this does not reproduce
+### Bracketing the optimal lambda
 
-The paper suggests lambda around 4-8 for Init[1] and 16 for Init[2]. Here **lambda is
-monotonically better up to 16 under both schemes**, so the optimum is not bracketed and may
-lie beyond 16, and the init-dependence does not appear.
+Extended to lambda = 128 at lr=1e-3 (`src/lora_plus_extended.py`):
 
-That may not be a contradiction. The paper selects lambda by test accuracy on GLUE tasks
-after convergence; this measures training loss on synthetic memorisation at a fixed 100-step
-budget. Different regime, and the fixed budget favours whichever setting moves fastest early.
+| lambda | Init[1] | Init[2] |
+|---|---|---|
+| 8 | 0.606 | 0.614 |
+| **16** | **0.252** | 0.427 |
+| **32** | 0.289 | **0.328** |
+| 64 | 0.733 | 0.411 |
+| 128 | 1.490 | 1.208 |
+
+Both optima are bracketed. **Init[1] peaks at lambda=16, Init[2] at lambda=32.**
+
+**The init-dependence reproduces in direction but not in magnitude.** The paper reports
+roughly 4-8 for Init[1] and 16 for Init[2], so Init[2] should want a 2-4x larger ratio.
+Measured here, Init[2] wants 2x what Init[1] wants, which matches. But both optima sit
+about 2-4x above the paper's values.
+
+Width does not explain the gap: the paper's GPT-2 experiments are also at n=768, so the
+Theta(n) term in Theorem 1 is held constant. The remaining candidates are the task
+(synthetic memorisation of 128 associations against GLUE) and the horizon (training loss at
+a fixed 100 steps against test accuracy after convergence). A fixed budget should favour
+whichever setting moves fastest early, which would push the measured optimum upward.
 
 ![LoRA+](report_lora_plus.png)
 
