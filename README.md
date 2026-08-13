@@ -10,6 +10,7 @@ Pre-MSDS work, summer 2026, toward an interpretability capstone at JHU AMS.
 - [x] **Steering-vector reachability** (`src/steering_reachability.py`)
 - [x] **Metalinguistic judgment vs string probability** (`src/metalinguistic_gap.py`)
 - [x] **LoRA vs LoRA+** (`src/lora_plus.py`)
+- [x] **Does the optimal ratio depend on the training horizon?** (`src/lora_horizon.py`)
 - [ ] Sparse autoencoder features on the IOI circuit
 - [ ] Path patching, to show how the IOI components compose
 
@@ -202,6 +203,41 @@ a fixed 100 steps against test accuracy after convergence). A fixed budget shoul
 whichever setting moves fastest early, which would push the measured optimum upward.
 
 ![LoRA+](report_lora_plus.png)
+
+### Does the optimal ratio depend on the training horizon?
+
+The earlier sweeps measured at a fixed 100-step budget and found an optimal lambda well
+above the paper's recommendation. The paper selects lambda on test accuracy after several
+epochs. This isolates the horizon: one run per (lambda, seed), loss recorded throughout, so
+the argmin over lambda can be read off at every checkpoint. Rank 16, Init[1], lr 1e-3,
+three seeds.
+
+| step | best lambda | mean loss | margin over 2nd |
+|---|---|---|---|
+| 10 | 32 | 2.898 | 0.059 |
+| 50 | 32 | 1.492 | 0.041 |
+| 100 | 16 | 0.246 | 0.113 |
+| 200 | **8** | **0.016** | 0.041 |
+
+**The optimum decreases as training runs longer.** A short budget favours a large ratio; by
+step 200 the best ratio is 8, which is exactly the paper's recommendation for Init[1]
+(2^2 to 2^3). The step-200 result is the cleanest point in the run: lambda=8 at
+0.0161 with zero seed variance, against 0.057 for lambda=16 and 0.095 for lambda=32.
+
+So the discrepancy between the earlier 100-step result and the published values is at least
+partly a horizon effect. Extending the horizon moves this setup toward the paper's answer.
+
+**What this does not support.** The script reports argmin transitions after step 150 that
+flip between 8 and 16 several times. Those are noise. At step 250 the margin between first
+and second is 0.005 while the seed standard deviation is 0.014, and lambda=16 has a standard
+deviation larger than its mean (0.0130 ± 0.0138). The task is also saturated by then, with
+all competitive settings between 0.013 and 0.043, so late comparisons measure noise near
+zero.
+
+Defensible: lambda=32 early, lambda=8 by step 200, monotone decrease. Not defensible: any
+fine distinction between 8 and 16 late in training.
+
+![horizon](report_horizon.png)
 
 ## Notes and limitations
 
