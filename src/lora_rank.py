@@ -10,6 +10,9 @@ Fixed: Init[1], lr 1e-3, 100 steps. Two seeds per cell, since the earlier work h
 
 Run: python src/lora_rank.py
 """
+import csv
+import os
+
 import matplotlib.pyplot as plt
 import numpy as np
 import torch
@@ -24,6 +27,27 @@ RANKS = [4, 8, 16, 32]
 LAMBDAS = [1.0, 8.0, 16.0, 32.0]
 SEEDS = [0, 1]
 STEPS = 100
+
+# Results are appended as they finish, so an interrupted run can be resumed rather than
+# repeated. Each row is (rank, lambda, seed, final_loss).
+CHECKPOINT = "rank_sweep_results.csv"
+
+
+def load_done():
+    if not os.path.exists(CHECKPOINT):
+        return {}
+    with open(CHECKPOINT, newline="") as f:
+        return {(int(r["rank"]), float(r["lam"]), int(r["seed"])): float(r["loss"])
+                for r in csv.DictReader(f)}
+
+
+def record(rank, lam, seed, loss):
+    new = not os.path.exists(CHECKPOINT)
+    with open(CHECKPOINT, "a", newline="") as f:
+        w = csv.writer(f)
+        if new:
+            w.writerow(["rank", "lam", "seed", "loss"])
+        w.writerow([rank, lam, seed, loss])
 
 
 def train_once(rank, lam, seed, tokens, mask):
@@ -61,12 +85,25 @@ def main():
     print(f"lr {LR:g}, {SCHEME}, {STEPS} steps, alpha = rank so alpha/r = 1")
     print(f"{len(RANKS) * len(LAMBDAS) * len(SEEDS)} runs\n")
 
+    done = load_done()
+    if done:
+        print(f"resuming, {len(done)} of {len(RANKS)*len(LAMBDAS)*len(SEEDS)} runs already done\n")
+
     res = {}
     for rank in RANKS:
         for lam in LAMBDAS:
-            vals = [train_once(rank, lam, s, tokens, mask) for s in SEEDS]
+            vals = []
+            for s in SEEDS:
+                key = (rank, lam, s)
+                if key in done:
+                    vals.append(done[key])
+                    continue
+                loss = train_once(rank, lam, s, tokens, mask)
+                record(rank, lam, s, loss)
+                vals.append(loss)
             res[(rank, lam)] = (float(np.mean(vals)), float(np.std(vals)))
-            print(f"rank={rank:>3}  lambda={lam:>5.0f}  {np.mean(vals):.4f} ± {np.std(vals):.4f}")
+            print(f"rank={rank:>3}  lambda={lam:>5.0f}  {np.mean(vals):.4f} ± {np.std(vals):.4f}",
+                  flush=True)
 
     print("\n" + "=" * 66)
     print("Mean final loss\n")
@@ -93,8 +130,23 @@ def main():
     if len(vals) > 1:
         print("The optimal lambda DEPENDS on rank in this range.")
         print("  " + ", ".join(f"r={r} wants {best[r]:.0f}" for r in RANKS))
-        print("  That is the axis muA characterises, and it is a live explanation for")
-        print("  why these optima sit above the published ones (which use r=8).")
+        bracketed = [r for r in RANKS if best[r] != max(LAMBDAS)]
+        if bracketed:
+            prods = {r: best[r] * r for r in bracketed}
+            print(f"  bracketed optima: " + ", ".join(f"r={r} gives lambda*r={p:.0f}"
+                                                      for r, p in prods.items()))
+            if len(set(prods.values())) == 1:
+                print("  lambda_opt is inversely proportional to rank over that range,")
+                print("  which is one of the two regimes the muA abstract describes.")
+        edge = [r for r in RANKS if best[r] == max(LAMBDAS)]
+        if edge:
+            print(f"  NOT bracketed at rank(s) {edge}: the best value sits at the edge of")
+            print("  the grid, so those rows give only a lower bound.")
+        # direction check against the paper, whose GLUE setup is rank 8 with lambda 4-8
+        if 8 in best:
+            print(f"\n  At the paper's rank (8) this setup wants lambda {best[8]:.0f},")
+            print("  against a published recommendation of 4 to 8. Rank therefore widens")
+            print("  the gap rather than explaining it, and works against the horizon effect.")
     else:
         print(f"The optimal lambda is STABLE at {list(vals)[0]:.0f} across ranks {RANKS}.")
         print("  Rank does not explain the gap against the published values here.")

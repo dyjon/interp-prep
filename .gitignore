@@ -2,3 +2,5 @@
 __pycache__/
 *.pyc
 .ipynb_checkpoints/
+rank_run.log
+rank_sweep_results.csv

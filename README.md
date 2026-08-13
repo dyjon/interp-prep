@@ -11,6 +11,7 @@ Pre-MSDS work, summer 2026, toward an interpretability capstone at JHU AMS.
 - [x] **Metalinguistic judgment vs string probability** (`src/metalinguistic_gap.py`)
 - [x] **LoRA vs LoRA+** (`src/lora_plus.py`)
 - [x] **Does the optimal ratio depend on the training horizon?** (`src/lora_horizon.py`)
+- [x] **Does the optimal ratio depend on rank?** (`src/lora_rank.py`)
 - [ ] Sparse autoencoder features on the IOI circuit
 - [ ] Path patching, to show how the IOI components compose
 
@@ -238,6 +239,48 @@ Defensible: lambda=32 early, lambda=8 by step 200, monotone decrease. Not defens
 fine distinction between 8 and 16 late in training.
 
 ![horizon](report_horizon.png)
+
+### Does the optimal ratio depend on rank?
+
+Rank is the other axis on which this setup differs from the paper: the LoRA+ GLUE
+experiments use alpha = r = 8, while the earlier sweeps here used rank 16. It is also the
+axis the muA paper (Chen, Villar, Hayou) characterises. Alpha tracks rank throughout so the
+alpha/r scaling factor stays fixed at 1, Init[1], lr 1e-3, 100 steps, two seeds.
+
+| rank | lambda=1 | lambda=8 | lambda=16 | lambda=32 | best |
+|---|---|---|---|---|---|
+| 4 | 2.639 | 1.539 | 1.121 | **0.926** | ≥32, at the edge |
+| 8 | 2.312 | 1.023 | 0.527 | **0.240** | ≥32, at the edge |
+| 16 | 1.982 | 0.517 | **0.265** | 0.396 | **16**, bracketed |
+| 32 | 1.428 | **0.284** | 0.381 | 0.487 | **8**, bracketed |
+
+**The optimal ratio falls as rank rises.** For the two rows where the optimum is bracketed,
+lambda_opt × rank = 256 exactly (16×16 and 32×8), so lambda_opt is inversely proportional to
+rank over that range. The muA abstract describes two regimes, one where the optimal rate is
+roughly invariant across ranks and one where it scales inversely with rank; this looks like
+the second.
+
+**This does not explain the gap against the published values. It widens it.** The LoRA+ GLUE
+setup is rank 8, where the paper recommends lambda around 4 to 8. At rank 8 this setup wants
+lambda of at least 32. Moving to the paper's rank pushes the optimum further from the
+paper's recommendation, not closer.
+
+So rank and horizon act in opposite directions:
+
+- lower rank leads to higher optimal lambda (this experiment)
+- longer horizon leads to lower optimal lambda (the horizon experiment)
+
+The paper's configuration is rank 8 with multi-epoch training; this setup was rank 16 at 100
+steps. The horizon effect is what reconciles the two, and rank works against it.
+
+**Caveats.** Only ranks 16 and 32 have a bracketed optimum; at ranks 4 and 8 the best value
+sits at the edge of the grid, so those rows establish only a lower bound. Two seeds, and
+some margins are close to the seed spread: at rank 16 the gap between lambda 16 and 32 is
+0.13 against a standard deviation of 0.11. The clean rows are rank 32 (margin 0.097, sd
+0.034) and the overall monotone trend. The lambda × rank = 256 relation rests on two points
+and should be treated as suggestive.
+
+![rank](report_rank.png)
 
 ## Notes and limitations
 
