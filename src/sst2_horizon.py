@@ -100,12 +100,23 @@ def build_data(tokenizer):
         return tokenizer(batch["sentence"], truncation=True,
                          max_length=MAX_LEN, padding="max_length")
 
-    train = train.map(enc, batched=True)
-    dev = dev.map(enc, batched=True)
     cols = ["input_ids", "attention_mask", "label"]
-    train.set_format("torch", columns=cols)
-    dev.set_format("torch", columns=cols)
+    train = train.map(enc, batched=True).select_columns(cols)
+    dev = dev.map(enc, batched=True).select_columns(cols)
     return train, dev
+
+
+def collate(batch):
+    """Build tensors by hand.
+
+    datasets 4.x set_format("torch") pulls in torchvision.io.VideoReader, which newer
+    torchvision no longer exposes, so formatting is done here instead.
+    """
+    return {
+        "input_ids": torch.tensor([b["input_ids"] for b in batch], dtype=torch.long),
+        "attention_mask": torch.tensor([b["attention_mask"] for b in batch], dtype=torch.long),
+        "label": torch.tensor([b["label"] for b in batch], dtype=torch.long),
+    }
 
 
 @torch.no_grad()
@@ -146,7 +157,8 @@ def train_one(lam, seed, train_ds, dev_loader):
         {"params": list(model.classifier.parameters()), "lr": LR},
     ])
 
-    loader = DataLoader(train_ds, batch_size=BATCH_SIZE, shuffle=True, drop_last=True)
+    loader = DataLoader(train_ds, batch_size=BATCH_SIZE, shuffle=True,
+                        drop_last=True, collate_fn=collate)
     trace = []
     step = 0
     model.train()
@@ -249,7 +261,7 @@ def main():
     print(f"device: {DEVICE}")
     tokenizer = AutoTokenizer.from_pretrained(MODEL)
     train_ds, dev_ds = build_data(tokenizer)
-    dev_loader = DataLoader(dev_ds, batch_size=64)
+    dev_loader = DataLoader(dev_ds, batch_size=64, collate_fn=collate)
     print(f"train {len(train_ds)}, dev {len(dev_ds)}, {STEPS} steps, "
           f"eval every {EVAL_EVERY}\n")
 
