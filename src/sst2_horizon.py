@@ -87,7 +87,12 @@ def attach_lora(model, rank, alpha):
 
 
 def build_data(tokenizer):
-    ds = load_dataset("glue", "sst2")
+    # Recent versions of `datasets` require the full repo id; the bare name "glue"
+    # no longer resolves.
+    try:
+        ds = load_dataset("nyu-mll/glue", "sst2")
+    except Exception:
+        ds = load_dataset("glue", "sst2")
     train = ds["train"].shuffle(seed=0).select(range(TRAIN_SUBSET))
     dev = ds["validation"]
 
