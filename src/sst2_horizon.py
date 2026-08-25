@@ -236,7 +236,14 @@ def analyse():
     for i, s in enumerate(steps):
         means = {lam: acc[lam][:, i].mean() for lam in present}
         ranked = sorted(present, key=lambda l: -means[l])
-        best, second = ranked[0], ranked[1]
+        best = ranked[0]
+        if len(ranked) < 2:
+            # single-lambda run, e.g. a pilot: there is no runner-up to screen against
+            print(f"  step {s:>5}: lambda={best:>4.0f}  acc={means[best]:.4f}  "
+                  f"(only one lambda, no margin)")
+            prev = best
+            continue
+        second = ranked[1]
         margin = means[best] - means[second]
         noise = max(acc[best][:, i].std(), acc[second][:, i].std())
         flag = "" if margin > noise else "  (within noise)"
@@ -245,9 +252,12 @@ def analyse():
                   f"margin={margin:.4f} vs sd={noise:.4f}{flag}")
         prev = best
 
+    print()
+    if len(present) < 2:
+        print("Only one lambda present, so there is nothing to compare. Run the full grid.")
+        return
     first = max(present, key=lambda l: acc[l][:, 0].mean())
     last = max(present, key=lambda l: acc[l][:, -1].mean())
-    print()
     if first != last:
         print(f"The optimum moves: lambda={first:.0f} early, lambda={last:.0f} at the end.")
         print("Check the margins above before treating any single transition as real.")
