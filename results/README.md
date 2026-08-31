@@ -5,7 +5,7 @@ the previous one had a hole.
 
 | | Question | Answer |
 |---|---|---|
-| [01-horizon.md](01-horizon.md) | Does the optimal λ depend on training length? | **No.** λ = 1–2 wins at every checkpoint. λ = 32 diverges |
+| [01-horizon.md](01-horizon.md) | Does the optimal λ depend on training length? | **No.** No drift from high λ to low. λ = 32 diverges |
 | [02-ratio-ladders.md](02-ratio-ladders.md) | Does the ratio matter, or only η_B = λ·η_A? | **Only η_B, at one width.** η_A moves 32× at fixed η_B and nothing changes |
 | [03-width.md](03-width.md) | Do the optimal rates move with width? | **λ\* rises 0.2 → 2.0** across 128 → 768. η_B\* flat |
 

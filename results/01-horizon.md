@@ -24,9 +24,12 @@ Script: [`src/sst2_horizon.py`](../src/sst2_horizon.py)
 
 ## What it shows
 
-**The optimum does not move.** λ = 1 or 2 is best at every checkpoint from step 100 to
-2,500. Of the sixteen checkpoints where the argmax changed, thirteen had a margin smaller
-than the seed spread.
+**The optimum does not trend.** It bounces among λ = 1, 2, 4 and 8 over the first thousand
+steps, then sits at 1 or 2 from step 1000 onward. Of the sixteen checkpoints listed by the
+analysis, thirteen have a margin smaller than the seed spread.
+
+**There is no drift from high λ to low λ** of the kind the synthetic task showed, which went
+32 → 16 → 8 across 200 steps. That absence is the result.
 
 **λ = 32 diverges.** 0.509 is the majority class on SST-2 dev. Both seeds, every
 checkpoint, no recovery. η_B = 32 × 3e-4 = 9.6e-3 is past the stability edge; 16 × 3e-4 =

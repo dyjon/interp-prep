@@ -14,22 +14,25 @@ Script: [`src/sst2_ratio_control.py`](../src/sst2_ratio_control.py)
 
 4.8e-3 was the largest η_B in the horizon sweep that did not diverge.
 
-| η_A | λ | η_B |
-|---|---|---|
-| 3.0e-04 | 16 | 4.8e-03 |
-| 6.0e-04 | 8 | 4.8e-03 |
-| 1.2e-03 | 4 | 4.8e-03 |
-| 2.4e-03 | 2 | 4.8e-03 |
-| 4.8e-03 | 1 | 4.8e-03 |
+| η_A | λ | η_B | final acc | best acc |
+|---|---|---|---|---|
+| 3.0e-04 | 16 | 4.8e-03 | **.9169** ±.0075 | .9260 |
+| 6.0e-04 | 8 | 4.8e-03 | .7156 ±.2054 | .8429 |
+| 1.2e-03 | 4 | 4.8e-03 | .8417 ±.0459 | .9209 |
+| 2.4e-03 | 2 | 4.8e-03 | .5006 ±.0086 | .7053 |
+| 4.8e-03 | 1 | 4.8e-03 | .5092 ±.0000 | .5092 |
 
 **Spread across the ladder: 0.4163. Worst seed sd: 0.2064.**
 
-Looks like an enormous ratio effect. It is not. **The low-λ end collapses to 0.509**,
-majority class — confirmed for (2.4e-3, λ=2) and (4.8e-3, λ=1). The spread is
-configurations falling off the stability boundary, not the ratio doing work.
+Looks like an enormous ratio effect. It is not. **The low-λ end collapses to majority
+class**, and the middle rows are unstable rather than merely worse:
 
-> ⚠ Per-cell accuracies for this ladder are in the committed Kaggle log, version #2. Pull
-> them before sharing this file if the exact numbers are wanted.
+- λ = 16 is the only tight row across seeds
+- λ = 8's ±.2054 is not measurement spread. It is one seed surviving and one collapsing
+- λ = 8 and λ = 4 both show final well below best, so they degrade *during* training
+- λ = 1 sits at majority class with sd exactly .0000, both seeds pinned
+
+Every one of those is a stability signature, not a performance ordering.
 
 ---
 
@@ -51,6 +54,11 @@ Nothing diverges, including λ = 1 at η_A = 1.2e-3.
 ---
 
 ## What it shows
+
+**η_A = 1.2e-3 appears in both ladders**, and gives .8417 at η_B = 4.8e-3 against .9157 at
+η_B = 1.2e-3. So the stability boundary is a curve in (η_A, η_B) space, not two independent
+ceilings. The width grid shows the same interaction at n = 768: η_A = 1.2e-3 gives .8526 at
+η_B = 1.2e-3 and .8257 at 4.8e-3.
 
 **η_A varies over a 32× range at fixed η_B and accuracy does not move.** So at this width,
 η_B is the operative quantity and λ is a reparametrisation of it. The λ dependence in the
