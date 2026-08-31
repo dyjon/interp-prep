@@ -1,19 +1,26 @@
 # Do the optimal rates move with width?
 
-The ladders showed λ is a reparametrisation **at one width**. That is a scaling claim, so
-it needs the width axis.
+The ladders showed that at one width only η_B does anything. That is a scaling claim, so it
+needs the width axis.
 
-LoRA+ makes two separate predictions, and they only come apart across n:
+**LoRA+** makes two separate predictions, and they only come apart across n:
 
     η_A* = Θ(1/n)   A's optimal rate falls as width grows
     η_B* = Θ(1)     B's optimal rate does not move
+
+⚠ **μA (Chen, Villar, Hayou 2026) predicts something different for this configuration.** At
+Init[A] with the paper's α = 1 — which is where these runs sit, since α_lora/r = 1 — it gives
+a single rate η = Θ(n^(-1/2) r^(-1/2)), with **A inert** (δ¹ → 0) and B doing the learning.
+So μA predicts the *active* rate falls as n^(-1/2), a **2.45×** drop over this width range,
+and makes no claim about an optimum for η_A at all.
 
 **A sweep at fixed λ cannot test this.** Pinning the ratio forces η_A = η_B/λ, so the two
 rates scale together by construction and the predictions collapse into one. Hence a 2D grid
 over both rates, with the argmax read in each coordinate separately.
 
 Widths are the BERT miniatures (Turc et al. 2019): **depth fixed at 4 layers**, hidden size
-128 to 768. Rank held at 8 throughout, which is the regime the Θ(1/n) claim is stated in.
+128 to 768. Rank held at 8 throughout. Note μA takes a **joint** (n, r) → ∞ limit, so a
+fixed-rank width sweep is a slice through its regime rather than a direct test of it.
 
 144 runs: 4 widths × 6 η_A × 3 η_B × 2 seeds, 1,000 steps. Kaggle, T4 ×2, 3h 25m.
 
@@ -91,24 +98,35 @@ quantity the experiment fails to resolve is biased against the result it found.
 
 **η_B\* is flat within noise.** 3e-4 at three widths, 1.2e-3 at 768 — and that jump is
 worth .0029 accuracy (.8526 against .8555) inside a visibly flat region. Consistent with
-Θ(1).
+LoRA+'s Θ(1), **and equally consistent with μA's n^(-1/2)**, for the grid reason below.
 
-**η_A\* falls by at least 2×, magnitude unresolved.** Θ(1/n) predicts 6× over this range.
-η_A* × n triples rather than staying constant, which points away from Θ(1/n) — but with two
-widths pinned at the boundary that column is a lower bound. **Θ(1/n) is neither confirmed
-nor excluded.**
+**η_A\* falls by at least 2×, and it is not clear what it is measuring.** LoRA+'s Θ(1/n)
+predicts 6× over this range and η_A* × n triples instead of staying constant, which points
+away from it — but two widths are pinned at the boundary, so that column is a lower bound.
+
+**Under μA the question is malformed.** If A is inert, η_A has no optimum; what this column
+may be tracking is the stability boundary, not a peak. That would also explain why the
+small-width rows climb monotonically to the grid edge rather than turning over.
+
+**⚠ The η_B grid is spaced 4× and μA predicts a 2.45× change.** That is less than one grid
+step, so **flat η_B\* is not evidence against n^(-1/2).** This experiment cannot resolve the
+prediction either way.
 
 ---
 
 ## ⚠ Limits, in order of severity
 
-1. **Two of four widths are unbracketed.** At n = 128 the η_B = 3e-4 row runs .7299 .7471
+1. **The η_B grid is too coarse to test the theory.** 4× spacing against a predicted 2.45×
+   change. **Any n^(-1/2) effect is invisible by construction.** Fixed by 2× spacing and a
+   wider width range, and this is the single change that would make every other number here
+   interpretable.
+2. **Two of four widths are unbracketed.** At n = 128 the η_B = 3e-4 row runs .7299 .7471
    .7529 .7552 .7569 .7592, monotone to the boundary. Those are lower bounds, not optima.
    Fixed by extending the η_A grid upward at the two small widths: 24 runs, ~30 minutes.
-2. **Different model family from the ladders.** These are 4-layer BERT; the ladders were
+3. **Different model family from the ladders.** These are 4-layer BERT; the ladders were
    12-layer RoBERTa. The internal comparison across widths is clean. The cross-experiment
    comparison with `02-ratio-ladders.md` is not.
-3. **Coarse grid.** 2× steps in η_A. A 6× width range predicts about two and a half grid
-   steps of movement in η_A*. Visible, not comfortable.
-4. **Two seeds.** Several adjacent cells differ by less than the seed spread.
-5. **One task**, one rank, one depth.
+4. **η_A may have no optimum to find.** If A is inert under Init[A], that column is tracking
+   a stability boundary, not a peak.
+5. **Two seeds.** Several adjacent cells differ by less than the seed spread.
+6. **One task**, one rank, one depth. Fixed rank against μA's joint limit.

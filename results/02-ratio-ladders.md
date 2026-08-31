@@ -61,7 +61,9 @@ ceilings. The width grid shows the same interaction at n = 768: η_A = 1.2e-3 gi
 η_B = 1.2e-3 and .8257 at 4.8e-3.
 
 **η_A varies over a 32× range at fixed η_B and accuracy does not move.** So at this width,
-η_B is the operative quantity and λ is a reparametrisation of it. The λ dependence in the
+η_B is the operative quantity. μA gives the mechanism: at Init[A] the update term from
+moving A scales as δ¹ = Θ(r^(-1/2)) → 0, so **A is inert and B does the learning**. A ladder
+flat in η_A is what that looks like. The λ dependence in the
 horizon sweep was a stability effect: large λ at fixed η_A fails because it pushes η_B past
 the edge, not because the ratio is wrong.
 
